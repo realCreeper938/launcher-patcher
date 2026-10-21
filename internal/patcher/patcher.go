@@ -83,14 +83,14 @@ func PatchFile(input string) (Result, error) {
 			}, nil
 		}
 
-		if hasUTF16ASCII(data, "PCL CE") {
+		if hasProductMarker(data, "PCL CE") {
 			return Result{
 				Kind:  KindPCLCE,
 				Input: abs,
 				Note:  "未检测到区域限制（可能已是修补版，或该版本尚未加入此限制）。",
 			}, nil
 		}
-		if hasUTF16ASCII(data, "Plain Craft Launcher") {
+		if hasProductMarker(data, "Plain Craft Launcher") {
 			return Result{
 				Kind:  KindPCL,
 				Input: abs,
@@ -187,6 +187,10 @@ func writeBytesAtomic(input string, data []byte, mode os.FileMode) (string, erro
 	}
 	committed = true
 	return output, nil
+}
+
+func hasProductMarker(data []byte, s string) bool {
+	return hasUTF16ASCII(data, s) || bytes.Contains(data, []byte(s))
 }
 
 func hasUTF16ASCII(data []byte, s string) bool {

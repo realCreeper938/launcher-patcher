@@ -48,8 +48,49 @@ jobs:
           HMCL_EXE_SAMPLE: ${{ runner.temp }}/samples/HMCL.exe
         run: go test ./internal/patcher -run '^TestReal' -v -count=1
 
+  windows-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Download pinned launcher samples
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "samples"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Invoke-WebRequest -Uri $env:PCL_CE_URL -OutFile (Join-Path $dir "PCL2_CE_Release_x64.exe")
+          Invoke-WebRequest -Uri $env:HMCL_JAR_URL -OutFile (Join-Path $dir "HMCL-3.17.0.362.jar")
+          Invoke-WebRequest -Uri $env:HMCL_EXE_URL -OutFile (Join-Path $dir "HMCL-3.17.0.362.exe")
+      - name: Build and patch on Windows
+        shell: pwsh
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          go build -trimpath -buildvcs=false -ldflags="-s -w -H=windowsgui" -o dist/launcher-patcher.exe .
+          $samples = Join-Path $env:RUNNER_TEMP "samples"
+          $exe = (Resolve-Path "dist/launcher-patcher.exe").Path
+          foreach ($name in @("PCL2_CE_Release_x64.exe", "HMCL-3.17.0.362.jar", "HMCL-3.17.0.362.exe")) {
+            $input = Join-Path $samples $name
+            $proc = Start-Process -FilePath $exe -ArgumentList "`"$input`"" -Wait -PassThru
+            if ($proc.ExitCode -ne 0) { throw "patch failed for $name (exit $($proc.ExitCode))" }
+            $base = [IO.Path]::GetFileNameWithoutExtension($name)
+            $expected = Join-Path $samples ($base + "_patched" + [IO.Path]::GetExtension($name))
+            if (-not (Test-Path $expected)) { throw "missing output $expected" }
+          }
+          $log = Join-Path $env:LOCALAPPDATA "launcher-patcher\last.log"
+          if (-not (Test-Path $log)) { throw "log file was not created" }
+          if (-not (Select-String -Path $log -Pattern "\[完成\]" -Quiet)) { throw "log has no success entry" }
+          Get-Item (Join-Path $samples "*_patched.*") | Select-Object Name, Length
+          Get-Content $log
+
   build:
-    needs: [unit, e2e]
+    needs: [unit, e2e, windows-smoke]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
