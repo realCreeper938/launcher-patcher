@@ -1,0 +1,106 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PCL_CE_URL: https://github.com/PCL-Community/PCL-CE/releases/download/v2.15.1/PCL2_CE_Release_x64.exe
+  HMCL_JAR_URL: https://github.com/HMCL-dev/HMCL/releases/download/v3.17.0.362/HMCL-3.17.0.362.jar
+  HMCL_EXE_URL: https://github.com/HMCL-dev/HMCL/releases/download/v3.17.0.362/HMCL-3.17.0.362.exe
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Unit tests
+        run: go test ./... -count=1
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Download pinned launcher samples
+        run: |
+          mkdir -p "$RUNNER_TEMP/samples"
+          curl -fL --retry 3 --retry-delay 2 -o "$RUNNER_TEMP/samples/PCL2_CE_Release_x64.exe" "$PCL_CE_URL"
+          curl -fL --retry 3 --retry-delay 2 -o "$RUNNER_TEMP/samples/HMCL.jar" "$HMCL_JAR_URL"
+          curl -fL --retry 3 --retry-delay 2 -o "$RUNNER_TEMP/samples/HMCL.exe" "$HMCL_EXE_URL"
+      - name: Patch real launchers
+        env:
+          PCL_CE_SAMPLE: ${{ runner.temp }}/samples/PCL2_CE_Release_x64.exe
+          HMCL_JAR_SAMPLE: ${{ runner.temp }}/samples/HMCL.jar
+          HMCL_EXE_SAMPLE: ${{ runner.temp }}/samples/HMCL.exe
+        run: go test ./internal/patcher -run '^TestReal' -v -count=1
+
+  build:
+    needs: [unit, e2e]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build windows/${{ matrix.arch }}
+        env:
+          GOOS: windows
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist
+          go build -trimpath -buildvcs=false -ldflags="-s -w -H=windowsgui" \
+            -o "dist/launcher-patcher-windows-${{ matrix.arch }}.exe" .
+          file "dist/launcher-patcher-windows-${{ matrix.arch }}.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: launcher-patcher-windows-${{ matrix.arch }}
+          path: dist/launcher-patcher-windows-${{ matrix.arch }}.exe
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum ./*.exe > SHA256SUMS
+          cat SHA256SUMS
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/*.exe dist/SHA256SUMS --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/*.exe dist/SHA256SUMS \
+              --title "launcher-patcher $GITHUB_REF_NAME" --generate-notes
+          fi
