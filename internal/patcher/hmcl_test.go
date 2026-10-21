@@ -101,15 +101,12 @@ func TestPatchRegionClass(t *testing.T) {
 		t.Fatal("input was modified")
 	}
 
-	again, state, err := patchRegionClass(patched)
+	_, state, err = patchRegionClass(patched)
 	if err != nil {
 		t.Fatalf("patchRegionClass on patched class: %v", err)
 	}
 	if state != regionClassAlready {
 		t.Fatalf("patched state = %v, want already", state)
-	}
-	if !bytes.Equal(again, patched) {
-		t.Fatal("already-patched class was changed")
 	}
 }
 

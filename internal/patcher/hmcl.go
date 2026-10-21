@@ -263,6 +263,15 @@ func patchHMCLArchive(zs *appendedZip, input string, kind Kind, mode os.FileMode
 			}
 			continue
 		}
+		if strings.HasSuffix(entry.Name, "/") {
+			header := entry.FileHeader
+			if _, err := zw.CreateHeader(&header); err != nil {
+				_ = zw.Close()
+				_ = tmp.Close()
+				return Result{}, fmt.Errorf("重建 HMCL jar 目录条目失败: %w", err)
+			}
+			continue
+		}
 		if err := zw.Copy(entry); err != nil {
 			_ = zw.Close()
 			_ = tmp.Close()
