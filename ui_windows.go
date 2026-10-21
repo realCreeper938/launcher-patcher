@@ -6,15 +6,17 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/realCreeper938/launcher-patcher/internal/patcher"
 )
 
 const (
-	idleText = "将要修补的启动器文件拖到此窗口"
+	idleText = "点击窗口任意处选择启动器文件"
 
 	wmCreate       = 0x0001
 	wmDestroy      = 0x0002
@@ -22,15 +24,20 @@ const (
 	wmPaint        = 0x000F
 	wmEraseBkgnd   = 0x0014
 	wmKeyDown      = 0x0100
-	wmTimer        = 0x0113
+	wmLButtonUp    = 0x0202
 	wmDropFiles    = 0x0233
 	wmDPIChanged   = 0x02E0
 	wmAppDone      = 0x8001
-	closeTimerID   = 1
+	wmAppProgress  = 0x8002
 	vkEscape       = 0x1B
 	dtCenter       = 0x0001
 	dtWordBreak    = 0x0010
+	dtSingleLine   = 0x0020
+	dtEndEllipsis  = 0x8000
 	dtNoPrefix     = 0x2000
+	mbOK           = 0x0000
+	mbIconError    = 0x0010
+	mbIconInfo     = 0x0040
 	wsOverlapped   = 0x00000000
 	wsCaption      = 0x00C00000
 	wsSysMenu      = 0x00080000
@@ -45,6 +52,7 @@ var (
 	user32   = syscall.NewLazyDLL("user32.dll")
 	gdi32    = syscall.NewLazyDLL("gdi32.dll")
 	shell32  = syscall.NewLazyDLL("shell32.dll")
+	comdlg32 = syscall.NewLazyDLL("comdlg32.dll")
 	kernel32 = syscall.NewLazyDLL("kernel32.dll")
 
 	procRegisterClassExW       = user32.NewProc("RegisterClassExW")
@@ -66,8 +74,6 @@ var (
 	procDrawTextW              = user32.NewProc("DrawTextW")
 	procLoadCursorW            = user32.NewProc("LoadCursorW")
 	procLoadIconW              = user32.NewProc("LoadIconW")
-	procSetTimer               = user32.NewProc("SetTimer")
-	procKillTimer              = user32.NewProc("KillTimer")
 	procSetWindowPos           = user32.NewProc("SetWindowPos")
 	procGetSystemMetrics       = user32.NewProc("GetSystemMetrics")
 	procAdjustWindowRectEx     = user32.NewProc("AdjustWindowRectEx")
@@ -82,10 +88,6 @@ var (
 	procSelectObject           = gdi32.NewProc("SelectObject")
 	procDeleteObject           = gdi32.NewProc("DeleteObject")
 	procCreateSolidBrush       = gdi32.NewProc("CreateSolidBrush")
-	procCreatePen              = gdi32.NewProc("CreatePen")
-	procGetStockObject         = gdi32.NewProc("GetStockObject")
-	procRoundRect              = gdi32.NewProc("RoundRect")
-	procPolygon                = gdi32.NewProc("Polygon")
 	procSetBkMode              = gdi32.NewProc("SetBkMode")
 	procSetTextColor           = gdi32.NewProc("SetTextColor")
 	procCreateFontW            = gdi32.NewProc("CreateFontW")
@@ -93,15 +95,19 @@ var (
 	procCreateBitmap           = gdi32.NewProc("CreateBitmap")
 	procCreateIconIndirect     = user32.NewProc("CreateIconIndirect")
 	procDrawIconEx             = user32.NewProc("DrawIconEx")
+	procGetOpenFileNameW       = comdlg32.NewProc("GetOpenFileNameW")
+	procMessageBoxW            = user32.NewProc("MessageBoxW")
 
 	wndProcCallback uintptr
 	mainWindow      uintptr
 
-	uiMu      sync.Mutex
-	uiStatus  = idleText
-	uiError   bool
-	uiBusy    bool
-	uiPending *patchOutcome
+	uiMu       sync.Mutex
+	uiStatus   = idleText
+	uiError    bool
+	uiBusy     bool
+	uiProgress int
+	uiLog      []string
+	uiPending  *patchOutcome
 )
 
 type point struct {
@@ -151,9 +157,38 @@ type winMessage struct {
 }
 
 type patchOutcome struct {
-	summary    string
-	failed     bool
-	closeDelay uintptr
+	summary string
+	failed  bool
+	outputs []string
+}
+
+type openFileName struct {
+	lStructSize       uint32
+	_                 uint32
+	hwndOwner         uintptr
+	hInstance         uintptr
+	lpstrFilter       *uint16
+	lpstrCustomFilter *uint16
+	nMaxCustFilter    uint32
+	nFilterIndex      uint32
+	lpstrFile         *uint16
+	nMaxFile          uint32
+	_                 uint32
+	lpstrFileTitle    *uint16
+	nMaxFileTitle     uint32
+	_                 uint32
+	lpstrInitialDir   *uint16
+	lpstrTitle        *uint16
+	flags             uint32
+	nFileOffset       uint16
+	nFileExtension    uint16
+	lpstrDefExt       *uint16
+	lCustData         uintptr
+	lpfnHook          uintptr
+	lpTemplateName    *uint16
+	pvReserved        uintptr
+	dwReserved        uint32
+	flagsEx           uint32
 }
 
 func runUI() {
@@ -188,7 +223,7 @@ func runUI() {
 	exStyle := uint32(wsExAppWindow)
 	scale := float64(systemDPI()) / 96.0
 	clientWidth := int32(520 * scale)
-	clientHeight := int32(340 * scale)
+	clientHeight := int32(380 * scale)
 	frame := rect{right: clientWidth, bottom: clientHeight}
 	procAdjustWindowRectEx.Call(
 		uintptr(unsafe.Pointer(&frame)),
@@ -288,8 +323,12 @@ func windowProc(hwnd uintptr, message uint32, wParam, lParam uintptr) uintptr {
 	case wmCreate:
 		procDragAcceptFiles.Call(hwnd, 1)
 		return 0
+	case wmLButtonUp:
+		if !isBusy() {
+			chooseAndPatch(hwnd)
+		}
+		return 0
 	case wmDropFiles:
-		procKillTimer.Call(hwnd, closeTimerID)
 		handleDrop(hwnd, wParam)
 		return 0
 	case wmPaint:
@@ -307,13 +346,9 @@ func windowProc(hwnd uintptr, message uint32, wParam, lParam uintptr) uintptr {
 			procDestroyWindow.Call(hwnd)
 		}
 		return 0
-	case wmTimer:
-		if wParam == closeTimerID {
-			procKillTimer.Call(hwnd, closeTimerID)
-			if !isBusy() {
-				procDestroyWindow.Call(hwnd)
-			}
-		}
+	case wmAppProgress:
+		procInvalidateRect.Call(hwnd, 0, 0)
+		procUpdateWindow.Call(hwnd)
 		return 0
 	case wmAppDone:
 		finishProcessing(hwnd)
@@ -323,7 +358,6 @@ func windowProc(hwnd uintptr, message uint32, wParam, lParam uintptr) uintptr {
 		procInvalidateRect.Call(hwnd, 0, 1)
 		return 0
 	case wmDestroy:
-		procKillTimer.Call(hwnd, closeTimerID)
 		procPostQuitMessage.Call(0)
 		return 0
 	default:
@@ -359,7 +393,47 @@ func handleDrop(hwnd, hDrop uintptr) {
 	if len(paths) == 0 {
 		return
 	}
+	startPatch(hwnd, paths)
+}
 
+func chooseAndPatch(hwnd uintptr) {
+	filter := make([]uint16, 0, 64)
+	for _, part := range []string{"启动器文件", "*.exe;*.jar", "所有文件", "*.*"} {
+		value, err := syscall.UTF16FromString(part)
+		if err != nil {
+			return
+		}
+		filter = append(filter, value...)
+	}
+	filter = append(filter, 0)
+
+	buffer := make([]uint16, 1024)
+	title, _ := syscall.UTF16PtrFromString("选择启动器文件")
+	open := openFileName{
+		lStructSize:  uint32(unsafe.Sizeof(openFileName{})),
+		hwndOwner:    hwnd,
+		lpstrFilter:  &filter[0],
+		nFilterIndex: 1,
+		lpstrFile:    &buffer[0],
+		nMaxFile:     uint32(len(buffer)),
+		lpstrTitle:   title,
+		flags:        0x00001000 | 0x00000800 | 0x00080000 | 0x00000008 | 0x00000004,
+	}
+	result, _, _ := procGetOpenFileNameW.Call(uintptr(unsafe.Pointer(&open)))
+	if result == 0 {
+		return
+	}
+	length := 0
+	for length < len(buffer) && buffer[length] != 0 {
+		length++
+	}
+	if length == 0 {
+		return
+	}
+	startPatch(hwnd, []string{syscall.UTF16ToString(buffer[:length])})
+}
+
+func startPatch(hwnd uintptr, paths []string) {
 	uiMu.Lock()
 	if uiBusy {
 		uiMu.Unlock()
@@ -367,14 +441,20 @@ func handleDrop(hwnd, hDrop uintptr) {
 	}
 	uiBusy = true
 	uiError = false
-	uiStatus = "正在检查并修补，请稍候…"
+	uiProgress = 0
+	uiLog = nil
+	uiStatus = "正在修补，请稍候…"
 	uiMu.Unlock()
 
-	procInvalidateRect.Call(hwnd, 0, 1)
+	procInvalidateRect.Call(hwnd, 0, 0)
 	procUpdateWindow.Call(hwnd)
 
 	go func() {
-		outcome := runPatches(paths)
+		started := time.Now()
+		outcome := runPatches(hwnd, paths)
+		if elapsed := time.Since(started); elapsed < 600*time.Millisecond {
+			time.Sleep(600*time.Millisecond - elapsed)
+		}
 		uiMu.Lock()
 		uiPending = &outcome
 		uiMu.Unlock()
@@ -382,14 +462,42 @@ func handleDrop(hwnd, hDrop uintptr) {
 	}()
 }
 
-func runPatches(paths []string) patchOutcome {
+func reportProgress(hwnd uintptr, progress patcher.Progress) {
+	uiMu.Lock()
+	if progress.Percent >= 0 {
+		uiProgress = progress.Percent
+	}
+	if progress.Line != "" {
+		uiLog = append(uiLog, progress.Line)
+		if len(uiLog) > 200 {
+			uiLog = uiLog[len(uiLog)-200:]
+		}
+	}
+	uiMu.Unlock()
+	procPostMessageW.Call(hwnd, wmAppProgress, 0, 0)
+}
+
+func runPatches(hwnd uintptr, paths []string) patchOutcome {
 	logLines := make([]string, 0, len(paths))
 	var outputs []string
 	var notes []string
 	var failures []string
 
-	for _, path := range paths {
-		result, err := patcher.PatchFile(path)
+	total := len(paths)
+	if total == 0 {
+		total = 1
+	}
+	for index, path := range paths {
+		base := index * 100 / total
+		endPercent := (index + 1) * 100 / total
+		span := endPercent - base
+		reporter := func(progress patcher.Progress) {
+			reportProgress(hwnd, patcher.Progress{
+				Percent: base + progress.Percent*span/100,
+				Line:    progress.Line,
+			})
+		}
+		result, err := patcher.PatchFileWithReporter(path, reporter)
 		logLines = append(logLines, formatLogLine(path, result, err))
 		if err != nil {
 			failures = append(failures, filepath.Base(path)+": "+err.Error())
@@ -417,14 +525,14 @@ func runPatches(paths []string) patchOutcome {
 		if len(outputs) > 1 {
 			summary = fmt.Sprintf("修补完成，已生成 %d 个文件", len(outputs))
 		}
-		return patchOutcome{summary: summary, closeDelay: 1200}
+		return patchOutcome{summary: summary, outputs: outputs}
 	}
 
 	summary := "无需修补：未检测到区域限制。"
 	if len(notes) == 1 {
 		summary = notes[0]
 	}
-	return patchOutcome{summary: summary, closeDelay: 2000}
+	return patchOutcome{summary: summary}
 }
 
 func finishProcessing(hwnd uintptr) {
@@ -435,14 +543,41 @@ func finishProcessing(hwnd uintptr) {
 		uiStatus = outcome.summary
 		uiError = outcome.failed
 		uiBusy = false
+		if uiProgress < 100 {
+			uiProgress = 100
+		}
 	}
 	uiMu.Unlock()
 
-	procInvalidateRect.Call(hwnd, 0, 1)
+	procInvalidateRect.Call(hwnd, 0, 0)
 	procUpdateWindow.Call(hwnd)
-	if outcome != nil && !outcome.failed && outcome.closeDelay > 0 {
-		procSetTimer.Call(hwnd, closeTimerID, outcome.closeDelay, 0)
+
+	if outcome == nil {
+		return
 	}
+	if outcome.failed {
+		showMessage(hwnd, outcome.summary, "修补失败", mbOK|mbIconError)
+		return
+	}
+	if len(outcome.outputs) > 0 {
+		showMessage(hwnd, "修补完成。\n\n输出文件：\n"+strings.Join(outcome.outputs, "\n"), "修补完成", mbOK|mbIconInfo)
+		return
+	}
+	if outcome.summary != "" {
+		showMessage(hwnd, outcome.summary, "提示", mbOK|mbIconInfo)
+	}
+}
+
+func showMessage(hwnd uintptr, text, caption string, flags uint32) {
+	t, err := syscall.UTF16PtrFromString(text)
+	if err != nil {
+		return
+	}
+	c, err := syscall.UTF16PtrFromString(caption)
+	if err != nil {
+		return
+	}
+	procMessageBoxW.Call(hwnd, uintptr(unsafe.Pointer(t)), uintptr(unsafe.Pointer(c)), uintptr(flags))
 }
 
 func isBusy() bool {
@@ -483,6 +618,9 @@ func paintWindow(hwnd uintptr) {
 	uiMu.Lock()
 	status := uiStatus
 	isError := uiError
+	busy := uiBusy
+	progress := uiProgress
+	logLines := append([]string(nil), uiLog...)
 	uiMu.Unlock()
 
 	background, _, _ := procCreateSolidBrush.Call(colorRef(246, 247, 249))
@@ -497,7 +635,7 @@ func paintWindow(hwnd uintptr) {
 		top:    int32(14 * scale),
 		bottom: int32(36 * scale),
 	}
-	drawTextLine(hdc, "支持以下启动器", supportRect, -int32(14*scale), colorRef(99, 105, 116), 400)
+	drawTextLine(hdc, "支持以下启动器", supportRect, -int32(14*scale), colorRef(99, 105, 116), 400, dtCenter|dtWordBreak|dtNoPrefix)
 
 	iconSize := int32(48 * scale)
 	iconGap := int32(26 * scale)
@@ -522,26 +660,103 @@ func paintWindow(hwnd uintptr) {
 		}
 	}
 
-	dropSize := int32(108 * scale)
-	dropTop := int32(102 * scale)
-	dropLeft := (client.right - dropSize) / 2
-	drawDropIcon(hdc, dropLeft, dropTop, dropSize, scale, isError)
-
-	textTop := dropTop + dropSize + int32(14*scale)
-	textRect := rect{
-		left:   int32(24 * scale),
-		top:    textTop,
-		right:  client.right - int32(24*scale),
-		bottom: client.bottom - int32(14*scale),
+	statusRect := rect{
+		left:   int32(26 * scale),
+		right:  client.right - int32(26*scale),
+		top:    int32(108 * scale),
+		bottom: int32(164 * scale),
 	}
 	textColor := colorRef(44, 48, 56)
 	if isError {
 		textColor = colorRef(180, 35, 24)
 	}
-	drawTextLine(hdc, status, textRect, -int32(19*scale), textColor, 400)
+	drawTextLine(hdc, status, statusRect, -int32(18*scale), textColor, 400, dtCenter|dtWordBreak|dtNoPrefix)
+
+	if busy || progress > 0 {
+		bar := rect{
+			left:   int32(36 * scale),
+			right:  client.right - int32(36*scale),
+			top:    int32(170 * scale),
+			bottom: int32(178 * scale),
+		}
+		drawProgressBar(hdc, bar, progress)
+	}
+
+	logRect := rect{
+		left:   int32(28 * scale),
+		right:  client.right - int32(28*scale),
+		top:    int32(192 * scale),
+		bottom: client.bottom - int32(34*scale),
+	}
+	drawLogLines(hdc, logLines, logRect, scale)
+
+	footer := ""
+	if busy {
+		footer = "正在处理，请稍候"
+	} else if len(logLines) > 0 {
+		footer = "点击窗口任意处继续修补"
+	}
+	if footer != "" {
+		footerRect := rect{
+			left:   int32(20 * scale),
+			right:  client.right - int32(20*scale),
+			top:    client.bottom - int32(28*scale),
+			bottom: client.bottom - int32(10*scale),
+		}
+		drawTextLine(hdc, footer, footerRect, -int32(11*scale), colorRef(130, 136, 146), 400, dtCenter|dtSingleLine|dtNoPrefix)
+	}
 }
 
-func drawTextLine(hdc uintptr, value string, bounds rect, fontHeight int32, textColor uintptr, weight uint32) {
+func drawProgressBar(hdc uintptr, bounds rect, percent int) {
+	if bounds.right <= bounds.left || bounds.bottom <= bounds.top {
+		return
+	}
+	track, _, _ := procCreateSolidBrush.Call(colorRef(226, 229, 235))
+	procFillRect.Call(hdc, uintptr(unsafe.Pointer(&bounds)), track)
+	procDeleteObject.Call(track)
+
+	if percent <= 0 {
+		return
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	fillRect := bounds
+	fillRect.right = bounds.left + int32(int64(bounds.right-bounds.left)*int64(percent)/100)
+	fill, _, _ := procCreateSolidBrush.Call(colorRef(71, 120, 245))
+	procFillRect.Call(hdc, uintptr(unsafe.Pointer(&fillRect)), fill)
+	procDeleteObject.Call(fill)
+}
+
+func drawLogLines(hdc uintptr, lines []string, bounds rect, scale float64) {
+	if len(lines) == 0 {
+		return
+	}
+	lineHeight := int32(18 * scale)
+	if lineHeight <= 0 {
+		return
+	}
+	maxLines := int((bounds.bottom - bounds.top) / lineHeight)
+	if maxLines <= 0 {
+		return
+	}
+	start := len(lines) - maxLines
+	if start < 0 {
+		start = 0
+	}
+	for index, line := range lines[start:] {
+		top := bounds.top + int32(index)*lineHeight
+		row := rect{
+			left:   bounds.left,
+			right:  bounds.right,
+			top:    top,
+			bottom: top + lineHeight,
+		}
+		drawTextLine(hdc, line, row, -int32(12*scale), colorRef(102, 108, 118), 400, dtSingleLine|dtEndEllipsis|dtNoPrefix)
+	}
+}
+
+func drawTextLine(hdc uintptr, value string, bounds rect, fontHeight int32, textColor uintptr, weight uint32, flags uint32) {
 	if value == "" {
 		return
 	}
@@ -584,61 +799,8 @@ func drawTextLine(hdc uintptr, value string, bounds rect, fontHeight int32, text
 		uintptr(unsafe.Pointer(text)),
 		uintptr(^uint32(0)),
 		uintptr(unsafe.Pointer(&bounds)),
-		dtCenter|dtWordBreak|dtNoPrefix,
+		uintptr(flags),
 	)
-}
-
-func drawDropIcon(hdc uintptr, left, top, size int32, scale float64, isError bool) {
-	tileColor := colorRef(71, 120, 245)
-	if isError {
-		tileColor = colorRef(216, 76, 76)
-	}
-	tile, _, _ := procCreateSolidBrush.Call(tileColor)
-	nullPen, _, _ := procGetStockObject.Call(8)
-	oldBrush, _, _ := procSelectObject.Call(hdc, tile)
-	oldPen, _, _ := procSelectObject.Call(hdc, nullPen)
-	procRoundRect.Call(
-		hdc,
-		uintptr(uint32(left)),
-		uintptr(uint32(top)),
-		uintptr(uint32(left+size)),
-		uintptr(uint32(top+size)),
-		uintptr(uint32(size/4)),
-		uintptr(uint32(size/4)),
-	)
-	procSelectObject.Call(hdc, oldPen)
-	procSelectObject.Call(hdc, oldBrush)
-	procDeleteObject.Call(tile)
-
-	whiteBrush, _, _ := procGetStockObject.Call(0)
-	if whiteBrush == 0 {
-		return
-	}
-	oldBrush, _, _ = procSelectObject.Call(hdc, whiteBrush)
-	oldPen, _, _ = procSelectObject.Call(hdc, nullPen)
-
-	unit := func(value float64) int32 { return int32(value * scale) }
-	cx := left + size/2
-	shaftLeft := cx - unit(9)
-	shaftRight := cx + unit(9)
-	shaftTop := top + unit(21)
-	headTop := top + unit(59)
-	headLeft := cx - unit(27)
-	headRight := cx + unit(27)
-	tip := top + unit(87)
-	points := []point{
-		{x: shaftLeft, y: shaftTop},
-		{x: shaftRight, y: shaftTop},
-		{x: shaftRight, y: headTop},
-		{x: headRight, y: headTop},
-		{x: cx, y: tip},
-		{x: headLeft, y: headTop},
-		{x: shaftLeft, y: headTop},
-	}
-	procPolygon.Call(hdc, uintptr(unsafe.Pointer(&points[0])), uintptr(len(points)))
-
-	procSelectObject.Call(hdc, oldPen)
-	procSelectObject.Call(hdc, oldBrush)
 }
 
 func colorRef(red, green, blue uint8) uintptr {

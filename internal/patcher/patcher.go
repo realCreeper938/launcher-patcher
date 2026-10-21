@@ -28,8 +28,52 @@ type Result struct {
 	Note    string
 }
 
+// Progress describes one step reported while a launcher is being patched.
+type Progress struct {
+	Percent int
+	Line    string
+}
+
+// Reporter receives progress updates. It is called from the patching goroutine.
+type Reporter func(Progress)
+
 // PatchFile detects and patches a launcher without modifying the input file.
 func PatchFile(input string) (Result, error) {
+	return patchFile(input, nil)
+}
+
+// PatchFileWithReporter is PatchFile with progress reporting for the GUI.
+func PatchFileWithReporter(input string, reporter Reporter) (Result, error) {
+	return patchFile(input, reporter)
+}
+
+func report(reporter Reporter, percent int, format string, args ...any) {
+	if reporter == nil {
+		return
+	}
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	reporter(Progress{Percent: percent, Line: fmt.Sprintf(format, args...)})
+}
+
+func patchFile(input string, reporter Reporter) (result Result, err error) {
+	defer func() {
+		if err != nil {
+			report(reporter, 100, "失败: %v", err)
+			return
+		}
+		if result.Changed {
+			report(reporter, 100, "输出: %s", result.Output)
+		} else if result.Note != "" {
+			report(reporter, 100, "%s", result.Note)
+		}
+	}()
+
+	report(reporter, 3, "读取文件: %s", filepath.Base(input))
 	abs, err := filepath.Abs(input)
 	if err != nil {
 		return Result{}, fmt.Errorf("无法解析文件路径: %w", err)
@@ -42,8 +86,10 @@ func PatchFile(input string) (Result, error) {
 	if !info.Mode().IsRegular() {
 		return Result{}, fmt.Errorf("不是普通文件: %s", abs)
 	}
+	report(reporter, 8, "文件大小: %.1f MB", float64(info.Size())/(1024*1024))
 
-	if res, recognized, err := tryHMCL(abs, info.Mode()); recognized {
+	report(reporter, 15, "识别启动器类型…")
+	if res, recognized, err := tryHMCL(abs, info.Mode(), reporter); recognized {
 		return res, err
 	}
 
@@ -53,11 +99,13 @@ func PatchFile(input string) (Result, error) {
 	}
 
 	if len(data) >= 2 && data[0] == 'M' && data[1] == 'Z' {
+		report(reporter, 20, "检查 PCL CE 区域限制…")
 		scan, scanErr := scanPCLCE(data)
 		if scanErr != nil {
 			return Result{}, fmt.Errorf("检测到 PCL CE 区域限制，但无法修补: %w", scanErr)
 		}
 		if scan.found {
+			report(reporter, 40, "检测到 PCL CE")
 			if len(scan.patches) == 0 {
 				return Result{
 					Kind:  KindPCLCE,
@@ -66,10 +114,12 @@ func PatchFile(input string) (Result, error) {
 				}, nil
 			}
 
+			report(reporter, 65, "应用 PCL CE IL 补丁（%d 处）…", len(scan.patches))
 			patched, applyErr := applyILPatches(data, scan.patches)
 			if applyErr != nil {
 				return Result{}, applyErr
 			}
+			report(reporter, 85, "写入输出文件…")
 			output, writeErr := writeBytesAtomic(abs, patched, info.Mode())
 			if writeErr != nil {
 				return Result{}, writeErr
@@ -83,12 +133,15 @@ func PatchFile(input string) (Result, error) {
 			}, nil
 		}
 
+		report(reporter, 25, "检查 PCL2 下载限制…")
 		scan2, scan2Err := scanPCL2(data)
 		if scan2Err != nil {
 			return Result{}, fmt.Errorf("检测到 PCL2 的 MC 下载限制，但无法修补: %w", scan2Err)
 		}
 		if scan2.found {
+			report(reporter, 40, "检测到 PCL2")
 			if !scan2.restricted {
+				report(reporter, 45, "该版本没有 MC 下载限制")
 				return Result{
 					Kind:  KindPCL2,
 					Input: abs,
@@ -96,6 +149,7 @@ func PatchFile(input string) (Result, error) {
 				}, nil
 			}
 			if len(scan2.patches) == 0 {
+				report(reporter, 45, "文件已经是修补后的版本")
 				return Result{
 					Kind:  KindPCL2,
 					Input: abs,
@@ -103,10 +157,12 @@ func PatchFile(input string) (Result, error) {
 				}, nil
 			}
 
+			report(reporter, 65, "应用 PCL2 IL 补丁（%d 处）…", len(scan2.patches))
 			patched, applyErr := applyILPatches(data, scan2.patches)
 			if applyErr != nil {
 				return Result{}, applyErr
 			}
+			report(reporter, 85, "写入输出文件…")
 			output, writeErr := writeBytesAtomic(abs, patched, info.Mode())
 			if writeErr != nil {
 				return Result{}, writeErr
@@ -142,7 +198,7 @@ func PatchFile(input string) (Result, error) {
 	return Result{}, errors.New("无法识别该文件；请拖入 PCL2/PCL CE 的 exe，或 HMCL 的 jar/exe")
 }
 
-func tryHMCL(path string, mode os.FileMode) (Result, bool, error) {
+func tryHMCL(path string, mode os.FileMode, reporter Reporter) (Result, bool, error) {
 	zs, err := openAppendedZip(path)
 	if err != nil {
 		return Result{}, false, nil
@@ -157,6 +213,8 @@ func tryHMCL(path string, mode os.FileMode) (Result, bool, error) {
 	if zs.prefix != 0 {
 		kind = KindHMCLExe
 	}
+	report(reporter, 30, "检测到 %s", kind)
+	report(reporter, 55, "解析并重建 HMCL 归档…")
 
 	res, err := patchHMCLArchive(zs, path, kind, mode)
 	return res, true, err
