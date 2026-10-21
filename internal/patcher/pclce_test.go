@@ -27,21 +27,20 @@ func TestPlanPCLCEIL(t *testing.T) {
 		t.Fatalf("unexpected patch: %+v", patch)
 	}
 
-	patched, err := applyILPatches(realPCLGetterIL, []ilPatch{patch})
+	data := make([]byte, 1000+len(realPCLGetterIL))
+	copy(data[1000:], realPCLGetterIL)
+	patched, err := applyILPatches(data, []ilPatch{patch})
 	if err != nil {
 		t.Fatalf("applyILPatches: %v", err)
 	}
-	if patched[14] != 0x16 {
-		t.Fatalf("patched byte = 0x%02X, want 0x16", patched[14])
+	if patched[1014] != 0x16 {
+		t.Fatalf("patched byte = 0x%02X, want 0x16", patched[1014])
 	}
-	if !bytes.Equal(realPCLGetterIL, []byte{
-		0x02, 0x28, 0x92, 0x16, 0x00, 0x06, 0x0a, 0x06, 0x2c, 0x04, 0x06,
-		0x18, 0x33, 0x04, 0x17, 0x0b, 0x2b, 0x02, 0x16, 0x0b, 0x07, 0x2a,
-	}) {
+	if !bytes.Equal(data[1000:], realPCLGetterIL) {
 		t.Fatal("input slice was modified")
 	}
 
-	again, already, err := planPCLCEIL(clrMethod{code: patched, offset: 1000})
+	again, already, err := planPCLCEIL(clrMethod{code: patched[1000:], offset: 1000})
 	if err != nil {
 		t.Fatalf("planPCLCEIL on patched code: %v", err)
 	}

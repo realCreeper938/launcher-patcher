@@ -518,7 +518,7 @@ func parseJavaRegionClass(data []byte) (*javaClass, error) {
 		return nil, err
 	}
 	for i := 0; i < int(methods); i++ {
-		if err := r.skip(4); err != nil {
+		if err := r.skip(2); err != nil {
 			return nil, err
 		}
 		nameIndex, err := r.u2()
