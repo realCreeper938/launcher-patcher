@@ -142,3 +142,55 @@ func TestRealHMCLJar(t *testing.T) {
 func TestRealHMCLExe(t *testing.T) {
 	testRealHMCL(t, "HMCL_EXE_SAMPLE", KindHMCLExe)
 }
+
+func TestRealPCL2(t *testing.T) {
+	src := os.Getenv("PCL2_SAMPLE")
+	if src == "" {
+		t.Skip("PCL2_SAMPLE is not set")
+	}
+	input := copySample(t, src)
+	hashBefore := fileHash(t, input)
+
+	data, err := os.ReadFile(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scan, err := scanPCL2(data)
+	if err != nil {
+		t.Fatalf("scan sample: %v", err)
+	}
+	if !scan.found || !scan.restricted || len(scan.patches) == 0 {
+		t.Fatalf("sample does not contain the expected PCL2 restriction: %+v", scan)
+	}
+
+	result, err := PatchFile(input)
+	if err != nil {
+		t.Fatalf("PatchFile: %v", err)
+	}
+	if result.Kind != KindPCL2 || !result.Changed || result.Output == "" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if fileHash(t, input) != hashBefore {
+		t.Fatal("input file was modified")
+	}
+
+	out, err := os.ReadFile(result.Output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outScan, err := scanPCL2(out)
+	if err != nil {
+		t.Fatalf("scan output: %v", err)
+	}
+	if !outScan.found || !outScan.restricted || len(outScan.patches) != 0 {
+		t.Fatalf("output still contains patchable code: %+v", outScan)
+	}
+
+	again, err := PatchFile(result.Output)
+	if err != nil {
+		t.Fatalf("PatchFile on output: %v", err)
+	}
+	if again.Changed {
+		t.Fatalf("patched output is not idempotent: %+v", again)
+	}
+}

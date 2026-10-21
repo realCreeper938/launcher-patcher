@@ -16,29 +16,29 @@ import (
 const (
 	idleText = "将要修补的启动器文件拖到此窗口"
 
-	wmCreate      = 0x0001
-	wmDestroy     = 0x0002
-	wmClose       = 0x0010
-	wmPaint       = 0x000F
-	wmEraseBkgnd  = 0x0014
-	wmKeyDown     = 0x0100
-	wmTimer       = 0x0113
-	wmDropFiles   = 0x0233
-	wmDPIChanged  = 0x02E0
-	wmAppDone     = 0x8001
-	closeTimerID  = 1
-	vkEscape      = 0x1B
-	dtCenter      = 0x0001
-	dtWordBreak   = 0x0010
-	dtNoPrefix    = 0x2000
-	wsOverlapped  = 0x00000000
-	wsCaption     = 0x00C00000
-	wsSysMenu     = 0x00080000
+	wmCreate       = 0x0001
+	wmDestroy      = 0x0002
+	wmClose        = 0x0010
+	wmPaint        = 0x000F
+	wmEraseBkgnd   = 0x0014
+	wmKeyDown      = 0x0100
+	wmTimer        = 0x0113
+	wmDropFiles    = 0x0233
+	wmDPIChanged   = 0x02E0
+	wmAppDone      = 0x8001
+	closeTimerID   = 1
+	vkEscape       = 0x1B
+	dtCenter       = 0x0001
+	dtWordBreak    = 0x0010
+	dtNoPrefix     = 0x2000
+	wsOverlapped   = 0x00000000
+	wsCaption      = 0x00C00000
+	wsSysMenu      = 0x00080000
 	wsClipChildren = 0x02000000
-	wsExAppWindow = 0x00040000
-	swShow        = 5
-	swpNoZOrder   = 0x0004
-	swpNoActivate = 0x0010
+	wsExAppWindow  = 0x00040000
+	swShow         = 5
+	swpNoZOrder    = 0x0004
+	swpNoActivate  = 0x0010
 )
 
 var (
@@ -47,48 +47,52 @@ var (
 	shell32  = syscall.NewLazyDLL("shell32.dll")
 	kernel32 = syscall.NewLazyDLL("kernel32.dll")
 
-	procRegisterClassExW        = user32.NewProc("RegisterClassExW")
-	procCreateWindowExW         = user32.NewProc("CreateWindowExW")
-	procDefWindowProcW          = user32.NewProc("DefWindowProcW")
-	procShowWindow              = user32.NewProc("ShowWindow")
-	procUpdateWindow            = user32.NewProc("UpdateWindow")
-	procGetMessageW             = user32.NewProc("GetMessageW")
-	procTranslateMessage        = user32.NewProc("TranslateMessage")
-	procDispatchMessageW        = user32.NewProc("DispatchMessageW")
-	procPostQuitMessage         = user32.NewProc("PostQuitMessage")
-	procPostMessageW            = user32.NewProc("PostMessageW")
-	procDestroyWindow           = user32.NewProc("DestroyWindow")
-	procInvalidateRect          = user32.NewProc("InvalidateRect")
-	procGetClientRect           = user32.NewProc("GetClientRect")
-	procBeginPaint              = user32.NewProc("BeginPaint")
-	procEndPaint                = user32.NewProc("EndPaint")
-	procFillRect                = user32.NewProc("FillRect")
-	procDrawTextW               = user32.NewProc("DrawTextW")
-	procLoadCursorW             = user32.NewProc("LoadCursorW")
-	procLoadIconW               = user32.NewProc("LoadIconW")
-	procSetTimer                = user32.NewProc("SetTimer")
-	procKillTimer               = user32.NewProc("KillTimer")
-	procSetWindowPos            = user32.NewProc("SetWindowPos")
-	procGetSystemMetrics        = user32.NewProc("GetSystemMetrics")
-	procAdjustWindowRectEx      = user32.NewProc("AdjustWindowRectEx")
-	procGetDpiForWindow         = user32.NewProc("GetDpiForWindow")
-	procGetDpiForSystem         = user32.NewProc("GetDpiForSystem")
-	procSetProcessDPIAware      = user32.NewProc("SetProcessDPIAware")
-	procSetDpiAwarenessContext  = user32.NewProc("SetProcessDpiAwarenessContext")
-	procGetModuleHandleW        = kernel32.NewProc("GetModuleHandleW")
-	procDragAcceptFiles         = shell32.NewProc("DragAcceptFiles")
-	procDragQueryFileW          = shell32.NewProc("DragQueryFileW")
-	procDragFinish              = shell32.NewProc("DragFinish")
-	procSelectObject            = gdi32.NewProc("SelectObject")
-	procDeleteObject            = gdi32.NewProc("DeleteObject")
-	procCreateSolidBrush        = gdi32.NewProc("CreateSolidBrush")
-	procCreatePen               = gdi32.NewProc("CreatePen")
-	procGetStockObject          = gdi32.NewProc("GetStockObject")
-	procRoundRect               = gdi32.NewProc("RoundRect")
-	procPolygon                 = gdi32.NewProc("Polygon")
-	procSetBkMode               = gdi32.NewProc("SetBkMode")
-	procSetTextColor            = gdi32.NewProc("SetTextColor")
-	procCreateFontW             = gdi32.NewProc("CreateFontW")
+	procRegisterClassExW       = user32.NewProc("RegisterClassExW")
+	procCreateWindowExW        = user32.NewProc("CreateWindowExW")
+	procDefWindowProcW         = user32.NewProc("DefWindowProcW")
+	procShowWindow             = user32.NewProc("ShowWindow")
+	procUpdateWindow           = user32.NewProc("UpdateWindow")
+	procGetMessageW            = user32.NewProc("GetMessageW")
+	procTranslateMessage       = user32.NewProc("TranslateMessage")
+	procDispatchMessageW       = user32.NewProc("DispatchMessageW")
+	procPostQuitMessage        = user32.NewProc("PostQuitMessage")
+	procPostMessageW           = user32.NewProc("PostMessageW")
+	procDestroyWindow          = user32.NewProc("DestroyWindow")
+	procInvalidateRect         = user32.NewProc("InvalidateRect")
+	procGetClientRect          = user32.NewProc("GetClientRect")
+	procBeginPaint             = user32.NewProc("BeginPaint")
+	procEndPaint               = user32.NewProc("EndPaint")
+	procFillRect               = user32.NewProc("FillRect")
+	procDrawTextW              = user32.NewProc("DrawTextW")
+	procLoadCursorW            = user32.NewProc("LoadCursorW")
+	procLoadIconW              = user32.NewProc("LoadIconW")
+	procSetTimer               = user32.NewProc("SetTimer")
+	procKillTimer              = user32.NewProc("KillTimer")
+	procSetWindowPos           = user32.NewProc("SetWindowPos")
+	procGetSystemMetrics       = user32.NewProc("GetSystemMetrics")
+	procAdjustWindowRectEx     = user32.NewProc("AdjustWindowRectEx")
+	procGetDpiForWindow        = user32.NewProc("GetDpiForWindow")
+	procGetDpiForSystem        = user32.NewProc("GetDpiForSystem")
+	procSetProcessDPIAware     = user32.NewProc("SetProcessDPIAware")
+	procSetDpiAwarenessContext = user32.NewProc("SetProcessDpiAwarenessContext")
+	procGetModuleHandleW       = kernel32.NewProc("GetModuleHandleW")
+	procDragAcceptFiles        = shell32.NewProc("DragAcceptFiles")
+	procDragQueryFileW         = shell32.NewProc("DragQueryFileW")
+	procDragFinish             = shell32.NewProc("DragFinish")
+	procSelectObject           = gdi32.NewProc("SelectObject")
+	procDeleteObject           = gdi32.NewProc("DeleteObject")
+	procCreateSolidBrush       = gdi32.NewProc("CreateSolidBrush")
+	procCreatePen              = gdi32.NewProc("CreatePen")
+	procGetStockObject         = gdi32.NewProc("GetStockObject")
+	procRoundRect              = gdi32.NewProc("RoundRect")
+	procPolygon                = gdi32.NewProc("Polygon")
+	procSetBkMode              = gdi32.NewProc("SetBkMode")
+	procSetTextColor           = gdi32.NewProc("SetTextColor")
+	procCreateFontW            = gdi32.NewProc("CreateFontW")
+	procCreateDIBSection       = gdi32.NewProc("CreateDIBSection")
+	procCreateBitmap           = gdi32.NewProc("CreateBitmap")
+	procCreateIconIndirect     = user32.NewProc("CreateIconIndirect")
+	procDrawIconEx             = user32.NewProc("DrawIconEx")
 
 	wndProcCallback uintptr
 	mainWindow      uintptr
@@ -113,11 +117,11 @@ type rect struct {
 }
 
 type paintStruct struct {
-	hdc        uintptr
-	fErase     int32
-	rcPaint    rect
-	fRestore   int32
-	fIncUpdate int32
+	hdc         uintptr
+	fErase      int32
+	rcPaint     rect
+	fRestore    int32
+	fIncUpdate  int32
 	rgbReserved [32]byte
 }
 
@@ -183,8 +187,8 @@ func runUI() {
 	style := uint32(wsOverlapped | wsCaption | wsSysMenu | wsClipChildren)
 	exStyle := uint32(wsExAppWindow)
 	scale := float64(systemDPI()) / 96.0
-	clientWidth := int32(500 * scale)
-	clientHeight := int32(300 * scale)
+	clientWidth := int32(520 * scale)
+	clientHeight := int32(340 * scale)
 	frame := rect{right: clientWidth, bottom: clientHeight}
 	procAdjustWindowRectEx.Call(
 		uintptr(unsafe.Pointer(&frame)),
@@ -486,27 +490,68 @@ func paintWindow(hwnd uintptr) {
 	procDeleteObject.Call(background)
 
 	scale := float64(windowDPI(hwnd)) / 96.0
-	iconSize := int32(108 * scale)
-	iconTop := int32(38 * scale)
-	iconLeft := (client.right - iconSize) / 2
-	drawDropIcon(hdc, iconLeft, iconTop, iconSize, scale, isError)
 
-	textTop := iconTop + iconSize + int32(28*scale)
+	supportRect := rect{
+		left:   int32(20 * scale),
+		right:  client.right - int32(20*scale),
+		top:    int32(14 * scale),
+		bottom: int32(36 * scale),
+	}
+	drawTextLine(hdc, "支持以下启动器", supportRect, -int32(14*scale), colorRef(99, 105, 116), 400)
+
+	iconSize := int32(48 * scale)
+	iconGap := int32(26 * scale)
+	icons := launcherIcons(int(iconSize))
+	if len(icons) > 0 {
+		totalWidth := int32(len(icons))*iconSize + int32(len(icons)-1)*iconGap
+		iconLeft := (client.right - totalWidth) / 2
+		iconTop := int32(44 * scale)
+		for index, icon := range icons {
+			left := iconLeft + int32(index)*(iconSize+iconGap)
+			procDrawIconEx.Call(
+				hdc,
+				uintptr(uint32(left)),
+				uintptr(uint32(iconTop)),
+				icon,
+				uintptr(uint32(iconSize)),
+				uintptr(uint32(iconSize)),
+				0,
+				0,
+				0x0003,
+			)
+		}
+	}
+
+	dropSize := int32(108 * scale)
+	dropTop := int32(102 * scale)
+	dropLeft := (client.right - dropSize) / 2
+	drawDropIcon(hdc, dropLeft, dropTop, dropSize, scale, isError)
+
+	textTop := dropTop + dropSize + int32(14*scale)
 	textRect := rect{
 		left:   int32(24 * scale),
 		top:    textTop,
 		right:  client.right - int32(24*scale),
-		bottom: client.bottom - int32(18*scale),
+		bottom: client.bottom - int32(14*scale),
 	}
+	textColor := colorRef(44, 48, 56)
+	if isError {
+		textColor = colorRef(180, 35, 24)
+	}
+	drawTextLine(hdc, status, textRect, -int32(19*scale), textColor, 400)
+}
 
+func drawTextLine(hdc uintptr, value string, bounds rect, fontHeight int32, textColor uintptr, weight uint32) {
+	if value == "" {
+		return
+	}
 	face, _ := syscall.UTF16PtrFromString("Microsoft YaHei UI")
-	fontHeight := -int32(19 * scale)
 	font, _, _ := procCreateFontW.Call(
 		uintptr(uint32(fontHeight)),
 		0,
 		0,
 		0,
-		400,
+		uintptr(weight),
 		0,
 		0,
 		0,
@@ -521,29 +566,26 @@ func paintWindow(hwnd uintptr) {
 	if font != 0 {
 		oldFont, _, _ = procSelectObject.Call(hdc, font)
 	}
+	defer func() {
+		if font != 0 {
+			procSelectObject.Call(hdc, oldFont)
+			procDeleteObject.Call(font)
+		}
+	}()
+
 	procSetBkMode.Call(hdc, 1)
-
-	textColor := colorRef(44, 48, 56)
-	if isError {
-		textColor = colorRef(180, 35, 24)
-	}
 	procSetTextColor.Call(hdc, textColor)
-
-	text, _ := syscall.UTF16PtrFromString(status)
-	if text != nil {
-		procDrawTextW.Call(
-			hdc,
-			uintptr(unsafe.Pointer(text)),
-			uintptr(^uint32(0)),
-			uintptr(unsafe.Pointer(&textRect)),
-			dtCenter|dtWordBreak|dtNoPrefix,
-		)
+	text, _ := syscall.UTF16PtrFromString(value)
+	if text == nil {
+		return
 	}
-
-	if font != 0 {
-		procSelectObject.Call(hdc, oldFont)
-		procDeleteObject.Call(font)
-	}
+	procDrawTextW.Call(
+		hdc,
+		uintptr(unsafe.Pointer(text)),
+		uintptr(^uint32(0)),
+		uintptr(unsafe.Pointer(&bounds)),
+		dtCenter|dtWordBreak|dtNoPrefix,
+	)
 }
 
 func drawDropIcon(hdc uintptr, left, top, size int32, scale float64, isError bool) {

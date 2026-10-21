@@ -17,9 +17,9 @@ func TestClassifyPCLFallback(t *testing.T) {
 		recognized bool
 	}{
 		{
-			name:       "original PCL with promotional PCL CE string",
+			name:       "PCL2 with promotional PCL CE string",
 			data:       originalPCL,
-			wantKind:   KindPCL,
+			wantKind:   KindPCL2,
 			recognized: true,
 		},
 		{
@@ -51,7 +51,7 @@ func TestClassifyPCLFallback(t *testing.T) {
 	}
 }
 
-func TestPatchFileOriginalPCLIsNotPCLCE(t *testing.T) {
+func TestPatchFilePCL2IsNotPCLCE(t *testing.T) {
 	data := make([]byte, 0x40)
 	copy(data, "MZ")
 	data = append(data, []byte("Plain Craft Launcher")...)
@@ -66,10 +66,10 @@ func TestPatchFileOriginalPCLIsNotPCLCE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PatchFile: %v", err)
 	}
-	if res.Kind != KindPCL {
-		t.Fatalf("Kind = %q, want %q", res.Kind, KindPCL)
+	if res.Kind != KindPCL2 {
+		t.Fatalf("Kind = %q, want %q", res.Kind, KindPCL2)
 	}
 	if res.Changed || res.Output != "" {
-		t.Fatalf("original PCL was modified: %+v", res)
+		t.Fatalf("PCL2 was modified: %+v", res)
 	}
 }

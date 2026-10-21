@@ -16,7 +16,7 @@ const (
 	KindHMCLJar Kind = "HMCL jar"
 	KindHMCLExe Kind = "HMCL exe"
 	KindPCLCE   Kind = "PCL CE"
-	KindPCL     Kind = "PCL"
+	KindPCL2    Kind = "PCL2"
 )
 
 // Result describes the outcome of processing one input file.
@@ -83,13 +83,50 @@ func PatchFile(input string) (Result, error) {
 			}, nil
 		}
 
+		scan2, scan2Err := scanPCL2(data)
+		if scan2Err != nil {
+			return Result{}, fmt.Errorf("检测到 PCL2 的 MC 下载限制，但无法修补: %w", scan2Err)
+		}
+		if scan2.found {
+			if !scan2.restricted {
+				return Result{
+					Kind:  KindPCL2,
+					Input: abs,
+					Note:  "该 PCL2 版本没有 MC 下载限制，文件未修改。",
+				}, nil
+			}
+			if len(scan2.patches) == 0 {
+				return Result{
+					Kind:  KindPCL2,
+					Input: abs,
+					Note:  "文件已经是修补后的版本，无需重复修补。",
+				}, nil
+			}
+
+			patched, applyErr := applyILPatches(data, scan2.patches)
+			if applyErr != nil {
+				return Result{}, applyErr
+			}
+			output, writeErr := writeBytesAtomic(abs, patched, info.Mode())
+			if writeErr != nil {
+				return Result{}, writeErr
+			}
+			return Result{
+				Kind:    KindPCL2,
+				Input:   abs,
+				Output:  output,
+				Changed: true,
+				Note:    fmt.Sprintf("已移除 PCL2 的 MC 下载限制（%d 处）；2.99 的整合包安装功能（菜单/拖入/资源页）已被官方编译移除，无法恢复。", len(scan2.patches)),
+			}, nil
+		}
+
 		kind, recognized := classifyPCLFallback(data)
 		if recognized {
-			if kind == KindPCL {
+			if kind == KindPCL2 {
 				return Result{
-					Kind:  KindPCL,
+					Kind:  KindPCL2,
 					Input: abs,
-					Note:  "原版 PCL 没有同类区域限制，文件未修改。",
+					Note:  "该 PCL2 版本没有同类下载限制，文件未修改。",
 				}, nil
 			}
 			return Result{
@@ -99,10 +136,10 @@ func PatchFile(input string) (Result, error) {
 			}, nil
 		}
 
-		return Result{}, errors.New("无法识别该 exe；仅支持 PCL、PCL CE 和 HMCL")
+		return Result{}, errors.New("无法识别该 exe；仅支持 PCL2、PCL CE 和 HMCL")
 	}
 
-	return Result{}, errors.New("无法识别该文件；请拖入 PCL/PCL CE 的 exe，或 HMCL 的 jar/exe")
+	return Result{}, errors.New("无法识别该文件；请拖入 PCL2/PCL CE 的 exe，或 HMCL 的 jar/exe")
 }
 
 func tryHMCL(path string, mode os.FileMode) (Result, bool, error) {
@@ -190,15 +227,15 @@ func writeBytesAtomic(input string, data []byte, mode os.FileMode) (string, erro
 	return output, nil
 }
 
-// classifyPCLFallback distinguishes PCL CE from original PCL. PCL CE bundles
-// its PCL.Core assembly, while original PCL mentions "PCL CE" in promotional
-// strings, so the PCL.Core marker must win over the generic product name.
+// classifyPCLFallback distinguishes PCL CE from PCL2. PCL CE bundles its
+// PCL.Core assembly, while PCL2 mentions "PCL CE" in promotional strings, so
+// the PCL.Core marker must win over the generic product name.
 func classifyPCLFallback(data []byte) (Kind, bool) {
 	if bytes.Contains(data, []byte("PCL.Core")) {
 		return KindPCLCE, true
 	}
 	if hasProductMarker(data, "Plain Craft Launcher") {
-		return KindPCL, true
+		return KindPCL2, true
 	}
 	if hasProductMarker(data, "PCL CE") {
 		return KindPCLCE, true
