@@ -83,18 +83,19 @@ func PatchFile(input string) (Result, error) {
 			}, nil
 		}
 
-		if hasProductMarker(data, "PCL CE") {
+		kind, recognized := classifyPCLFallback(data)
+		if recognized {
+			if kind == KindPCL {
+				return Result{
+					Kind:  KindPCL,
+					Input: abs,
+					Note:  "原版 PCL 没有同类区域限制，文件未修改。",
+				}, nil
+			}
 			return Result{
 				Kind:  KindPCLCE,
 				Input: abs,
 				Note:  "未检测到区域限制（可能已是修补版，或该版本尚未加入此限制）。",
-			}, nil
-		}
-		if hasProductMarker(data, "Plain Craft Launcher") {
-			return Result{
-				Kind:  KindPCL,
-				Input: abs,
-				Note:  "原版 PCL 没有同类区域限制，文件未修改。",
 			}, nil
 		}
 
@@ -187,6 +188,22 @@ func writeBytesAtomic(input string, data []byte, mode os.FileMode) (string, erro
 	}
 	committed = true
 	return output, nil
+}
+
+// classifyPCLFallback distinguishes PCL CE from original PCL. PCL CE bundles
+// its PCL.Core assembly, while original PCL mentions "PCL CE" in promotional
+// strings, so the PCL.Core marker must win over the generic product name.
+func classifyPCLFallback(data []byte) (Kind, bool) {
+	if bytes.Contains(data, []byte("PCL.Core")) {
+		return KindPCLCE, true
+	}
+	if hasProductMarker(data, "Plain Craft Launcher") {
+		return KindPCL, true
+	}
+	if hasProductMarker(data, "PCL CE") {
+		return KindPCLCE, true
+	}
+	return "", false
 }
 
 func hasProductMarker(data []byte, s string) bool {
